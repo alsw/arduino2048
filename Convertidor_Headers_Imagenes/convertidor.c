@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-const char nombreArchivoSal[] = "../Sprites.h";
+const char nombreArchivoSal[] = "../_2048_LCD_Nokia_6100/Sprites.h";
 const char nombreArchivoEnt[] = "../Sprites/Sprites.h";
 
 int main() {
