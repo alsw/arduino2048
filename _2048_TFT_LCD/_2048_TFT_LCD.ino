@@ -10,7 +10,7 @@
 
 #define CFondo 0xbd74
 
-int Colores[13] = {
+static int Colores[13] = {
   0xce16,//0 -1
   0xFF00,//2048
   0xFF00,//8-3
@@ -26,12 +26,18 @@ int Colores[13] = {
   0xFF00,//2048
 };
 
-
-
+//Enumeracion de los estados del automata finito de juego
+enum ESTADO_JUEGO {
+  EJ_INACTIVO, EJ_DESPLAZAR, EJ_COMBINAR, EJ_CREAR,
+};
 
 //Enumeracion de los comandos de control de juego
 enum COMANDO_CONTROL {
   CC_IZQUIERDA, CC_DERECHA, CC_ARRIBA, CC_ABAJO, CC_REINICIAR,
+};
+
+enum DIR_MOVIMIENTO {
+  DM_IZQ, DM_DER, DM_ARR, DM_ABA,
 };
 
 Adafruit_TFTLCD Pantalla(LCD_CS, LCD_CD, LCD_WR, LCD_RD, LCD_RESET); // Instancia LCD
@@ -39,17 +45,22 @@ Adafruit_TFTLCD Pantalla(LCD_CS, LCD_CD, LCD_WR, LCD_RD, LCD_RESET); // Instanci
 //Instancia de objeto para la clase del sensor de gestos
 SparkFun_APDS9960 Sensor = SparkFun_APDS9960();
 
-int GrosorX = Pantalla.width() / 4 ;
-int GrosorY = GrosorX;
+static int GrosorX = Pantalla.width() / 4 ;
+static int GrosorY = GrosorX;
 //int GrosorY = Pantalla.height() / 4;
-
-static int ValorCelda[4][4] = {
-  { 1,  5,  9,  4},
-  { 2, 6,  10,  8},
-  { 3,  7,  11,  0},
+//x y
+int ValorCelda[4][4] = {
+  { 0,0,0,0},
+  { 2,2,2,0},
+  { 0,0,0,0},
   { 4, 8,  12,  0}
 };
 
+float Puntos = 100000;
+float PPuntos = Puntos;
+
+ESTADO_JUEGO EstadoJuego = EJ_INACTIVO;  //Estado actual del automata
+DIR_MOVIMIENTO DirMovimiento;            //Direccion de movimiento cuando se desplaza
 
 
 void setup() {
@@ -57,7 +68,7 @@ void setup() {
   Serial.begin(9600);
 
   //La semilla del generador de numeros pseudo-aleatorios se alimenta con un pin de ADC abierto
-  randomSeed(analogRead(0));
+  randomSeed(analogRead(A5));
 
   //Se inicializa el sensor de gestos
   Sensor.init();
@@ -69,13 +80,70 @@ void setup() {
   Pantalla.begin(0x9325); // Iniciamos el LCD especificando el controlador ILI9341.
   Pantalla.setRotation(2);
   Pantalla.fillScreen(CFondo);
+  //ReiniciarJuego();
   Dibujar();
 }
 
 void loop() {
+  switch (EstadoJuego) {
+    case EJ_INACTIVO:
+
+      break;
+    case EJ_DESPLAZAR:
+      char i, i_ini, i_fin, i_inc;//i i_inicio i_fin i_incremento
+      char j, j_ini, j_fin, j_inc;
+      switch (DirMovimiento) {
+        case DM_ARR:
+          i_ini = 0; i_fin = 4; i_inc = 1;    //Se iteran todas las columnas
+          j_ini = 1; j_fin = 4; j_inc = 1;    //Se iteran solo las 3 filas de abajo a arriba
+          break;
+        case DM_ABA:
+          i_ini = 0; i_fin = 4; i_inc = 1;    //Se iteran todas las columnas
+          j_ini = 2; j_fin = -1; j_inc = -1;  //Se iteran solo las 3 filas de arriba desde abajo
+          break;
+
+      }
+
+      for (i = i_ini; i != i_fin; i += i_inc) {
+        for (j = j_ini; j != j_fin; j += j_inc) {
+          if (ValorCelda[i][j] > 0) {
+            if ( ValorCelda[i][j - j_inc] > 0) {
+              if ( ValorCelda[i][j - j_inc] == ValorCelda[i][j]) {
+                ValorCelda[i][j] = 0;
+                ValorCelda[i][j - j_inc]++;
+              }
+            }
+            else {
+              ValorCelda[i][j - j_inc] = ValorCelda[i][j];
+              ValorCelda[i][j] = 0;
+            }
+          }
+        }
+      }
+      EstadoJuego = EJ_INACTIVO;
+      break;
+
+  }
+  DibujarPuntos();
+  Puntos++;
+  delay(100);
+  Dibujar();
   LeerSerial();
- // LeerGestos(); problemas I2C
-  
+  // LeerGestos(); problemas I2C
+}
+
+void DibujarPuntos() {
+  if (Puntos != PPuntos) {
+    PPuntos = Puntos;
+    Pantalla.fillRect(GrosorX * 2 + 3, GrosorY * 4 + 3, GrosorX * 2 - 3 * 2, GrosorY - 3 * 2 , CFondo);
+    Pantalla.setCursor(GrosorX * 2.5, GrosorY * 4 + 10);
+    Pantalla.setTextSize(2);
+    Pantalla.print("SCORE");
+    Pantalla.setCursor(GrosorX * 2 + 3, GrosorY * 4.5);
+    Pantalla.setTextSize(3); // Definimos tamaño del texto.
+    Pantalla.setTextColor(0x00FFFF);
+    Pantalla.print(Puntos, 0);
+  }
 }
 
 void DibujarCuadro(int x, int y, int potencia) {
@@ -143,23 +211,75 @@ void LeerSerial() {
     switch (caracter) {
       case 'w':
         Accion(CC_ARRIBA);
+        Serial.println("Ariba");
         break;
       case 'a':
         Accion(CC_IZQUIERDA);
+        Serial.println("Izquierda");
         break;
       case 's':
         Accion(CC_ABAJO);
+        Serial.println("Abajo");
         break;
       case 'd':
         Accion(CC_DERECHA);
+        Serial.println("Derecha");
         break;
       case 'r':
         Accion(CC_REINICIAR);
+        Serial.println("Reiniciar");
         break;
     }
   }
 }
 
 void Accion(COMANDO_CONTROL comando) {
+  if (EstadoJuego != EJ_INACTIVO) return;
+  switch (comando) {
+    case CC_IZQUIERDA:
+      EstadoJuego = EJ_DESPLAZAR;
+      DirMovimiento = DM_IZQ;
+      break;
+    case CC_DERECHA:
+      EstadoJuego = EJ_DESPLAZAR;
+      DirMovimiento = DM_DER;
+      break;
+    case CC_ARRIBA:
+      EstadoJuego = EJ_DESPLAZAR;
+      DirMovimiento = DM_ARR;
+      break;
+    case CC_ABAJO:
+      EstadoJuego = EJ_DESPLAZAR;
+      DirMovimiento = DM_ABA;
+      break;
+    case CC_REINICIAR:
+      ReiniciarJuego();
+      break;
+  }
+}
 
+void ReiniciarJuego() {
+  for (int i = 0; i < 4; i++) {
+    for (int j = 0; j < 4; j++) {
+      ValorCelda[i][j] = 0;
+    }
+  }
+  Puntos = 0;
+  PPuntos = 0;
+  EstadoJuego = EJ_INACTIVO;
+  Pantalla.fillScreen(CFondo);
+  crearCelda();
+  crearCelda();
+}
+
+void crearCelda() {
+  bool Encontrado = false;
+  do {
+    int i = random(4);
+    int j = random(4);
+    if (ValorCelda[i][j] == 0) {
+      ValorCelda[i][j] = 1;
+      Encontrado = true;
+    }
+  } while (!Encontrado);
 }
