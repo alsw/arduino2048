@@ -7,11 +7,12 @@
 #define LCD_WR A1
 #define LCD_RD A0
 //OJO OJO Se modifico el escujo cambiando el pin fisico de A4 hacia 12
-#define LCD_RESET 12 
+#define LCD_RESET 12
+
 #define CFondo 0xbd74
 
 static int Colores[13] = {
-  0xce16,//0 -1
+  0xce16,//0 0
   0xFF00,//2048
   0xFF00,//8-3
   0xFF00,//16-
@@ -28,7 +29,7 @@ static int Colores[13] = {
 
 //Enumeracion de los estados del automata finito de juego
 enum ESTADO_JUEGO {
-  EJ_INACTIVO, EJ_DESPLAZAR, EJ_COMBINAR, EJ_CREAR,
+  Ey_INACTIVO, Ey_DESPLAZAR, Ey_COMBINAR, Ey_CREAR,
 };
 
 //Enumeracion de los comandos de control de juego
@@ -50,86 +51,126 @@ static int GrosorY = GrosorX;
 //int GrosorY = Pantalla.height() / 4;
 //x y
 int ValorCelda[4][4] = {
-  { 0,0,0,0},
-  { 2,2,2,0},
-  { 0,0,0,0},
+  { 0, 0, 0, 0},
+  { 3, 2, 2, 0},
+  { 0, 0, 0, 0},
   { 4, 8,  12,  0}
 };
 
-float Puntos = 100000;
-float PPuntos = Puntos;
+int ValorCeldaPasada[4][4] = {
+  { 0, 0, 0, 0},
+  { 4, 2, 2, 0},
+  { 0, 0, 0, 0},
+  { 4, 8,  12,  0}
+};
+float Puntos = 0;
+float PPuntos = -1;
 
-ESTADO_JUEGO EstadoJuego = EJ_INACTIVO;  //Estado actual del automata
+ESTADO_JUEGO EstadoJuego = Ey_INACTIVO;  //Estado actual del automata
 DIR_MOVIMIENTO DirMovimiento;            //Direccion de movimiento cuando se desplaza
 
 
 void setup() {
   //Se inicializa el puerto serie
   Serial.begin(9600);
+  Serial.println("Iniciando");
 
   //La semilla del generador de numeros pseudo-aleatorios se alimenta con un pin de ADC abierto
   randomSeed(analogRead(A5));
+  Serial.println("Bajarando el mazo");
 
   //Se inicializa el sensor de gestos
   Sensor.init();
   Sensor.enableGestureSensor(false);
   Sensor.setLEDDrive(LED_DRIVE_12_5MA);  //Este par de calibraciones se hace porque el sensor esta muy sensible
   Sensor.setGestureGain(GGAIN_1X);       //por default. Mermar la ganancia y la luz mejora la respuesta.
+  Serial.println("Activando el sensor de Gestos");
+
 
   //Iniciar la pantalla con el driver correcto
   Pantalla.begin(0x9325); // Iniciamos el LCD especificando el controlador ILI9341.
   Pantalla.setRotation(2);
   Pantalla.fillScreen(CFondo);
-  //ReiniciarJuego();
+  Serial.println("Activando la pantalla");
+
+
+  ReiniciarJuego();
   Dibujar();
 }
 
 void loop() {
+  LeerSerial();//Buscas comando por el puero Serial
+  LeerGestos();//Busca comandos por el sensor de gestos
+
   switch (EstadoJuego) {
-    case EJ_INACTIVO:
+    case Ey_INACTIVO:
 
       break;
-    case EJ_DESPLAZAR:
-      char i, i_ini, i_fin, i_inc;//i i_inicio i_fin i_incremento
-      char j, j_ini, j_fin, j_inc;
+    case Ey_DESPLAZAR:
+      Serial.println("Empezando..");
+      char x, x_ini, x_fin, x_inc, x_bus;
+      char y, y_ini, y_fin, y_inc, y_bus;
+      boolean Continuar;
+      Continuar = false;
       switch (DirMovimiento) {
         case DM_ARR:
-          i_ini = 0; i_fin = 4; i_inc = 1;    //Se iteran todas las columnas
-          j_ini = 1; j_fin = 4; j_inc = 1;    //Se iteran solo las 3 filas de abajo a arriba
+          x_ini = 0; x_fin = 4; x_inc = 1; x_bus = 0;
+          y_ini = 1; y_fin = 4; y_inc = 1; y_bus = -1;
           break;
         case DM_ABA:
-          i_ini = 0; i_fin = 4; i_inc = 1;    //Se iteran todas las columnas
-          j_ini = 2; j_fin = -1; j_inc = -1;  //Se iteran solo las 3 filas de arriba desde abajo
+          x_ini = 0; x_fin = 4; x_inc = 1; x_bus = 0;
+          y_ini = 2; y_fin = -1; y_inc = -1; y_bus = 1;
           break;
-
+        case DM_IZQ:
+          x_ini = 1; x_fin = 4; x_inc = 1; x_bus = -1;
+          y_ini = 0; y_fin = 4; y_inc = 1; y_bus = 0;
+          break;
+        case DM_DER:
+          x_ini = 2; x_fin = -1; x_inc = -1; x_bus = 1;
+          y_ini = 0; y_fin = 4; y_inc = 1; y_bus = 0;
+          break;
       }
 
-      for (i = i_ini; i != i_fin; i += i_inc) {
-        for (j = j_ini; j != j_fin; j += j_inc) {
-          if (ValorCelda[i][j] > 0) {
-            if ( ValorCelda[i][j - j_inc] > 0) {
-              if ( ValorCelda[i][j - j_inc] == ValorCelda[i][j]) {
-                ValorCelda[i][j] = 0;
-                ValorCelda[i][j - j_inc]++;
+      for (x = x_ini; x != x_fin; x += x_inc) {
+        for (y = y_ini; y != y_fin; y += y_inc) {
+          if (ValorCelda[x][y] > 0) {
+            if ( ValorCelda[x + x_bus][y + y_bus] > 0) {
+              if ( ValorCelda[x + x_bus][y + y_bus] == ValorCelda[x][y]) {
+                ValorCelda[x][y] = 0;
+                ValorCelda[x + x_bus][y + y_bus]++;
+                Puntos += pow(2, ValorCelda[x + x_bus][y + y_bus]);
               }
             }
             else {
-              ValorCelda[i][j - j_inc] = ValorCelda[i][j];
-              ValorCelda[i][j] = 0;
+              ValorCelda[x + x_bus][y + y_bus] = ValorCelda[x][y];
+              ValorCelda[x][y] = 0;
             }
           }
         }
+
       }
-      EstadoJuego = EJ_INACTIVO;
+      for (x = x_ini; x != x_fin; x += x_inc) {
+        for (y = y_ini; y != y_fin; y += y_inc) {
+          if ( ValorCelda[x][y] > 0 && ValorCelda[x + x_bus][y + y_bus] == 0) {
+            Continuar = true;
+            Serial.println("Segir");
+          }
+        }
+      }
+      if (!Continuar)
+        EstadoJuego = Ey_CREAR;
+
+      break;
+    case  Ey_CREAR:
+      Serial.println("Creando");
+      crearCelda();
+      EstadoJuego = Ey_INACTIVO;
+
       break;
 
   }
-  DibujarPuntos();
-  Puntos++;
-  delay(100);
-  Dibujar();
-  LeerSerial();
-  // LeerGestos(); problemas I2C
+  DibujarPuntos();//Dibuja el Marcador
+  Dibujar();//Actualizar la pantalla
 }
 
 void DibujarPuntos() {
@@ -234,22 +275,22 @@ void LeerSerial() {
 }
 
 void Accion(COMANDO_CONTROL comando) {
-  if (EstadoJuego != EJ_INACTIVO) return;
+  if (EstadoJuego != Ey_INACTIVO) return;
   switch (comando) {
     case CC_IZQUIERDA:
-      EstadoJuego = EJ_DESPLAZAR;
+      EstadoJuego = Ey_DESPLAZAR;
       DirMovimiento = DM_IZQ;
       break;
     case CC_DERECHA:
-      EstadoJuego = EJ_DESPLAZAR;
+      EstadoJuego = Ey_DESPLAZAR;
       DirMovimiento = DM_DER;
       break;
     case CC_ARRIBA:
-      EstadoJuego = EJ_DESPLAZAR;
+      EstadoJuego = Ey_DESPLAZAR;
       DirMovimiento = DM_ARR;
       break;
     case CC_ABAJO:
-      EstadoJuego = EJ_DESPLAZAR;
+      EstadoJuego = Ey_DESPLAZAR;
       DirMovimiento = DM_ABA;
       break;
     case CC_REINICIAR:
@@ -266,7 +307,7 @@ void ReiniciarJuego() {
   }
   Puntos = 0;
   PPuntos = 0;
-  EstadoJuego = EJ_INACTIVO;
+  EstadoJuego = Ey_INACTIVO;
   Pantalla.fillScreen(CFondo);
   crearCelda();
   crearCelda();
@@ -278,7 +319,7 @@ void crearCelda() {
     int i = random(4);
     int j = random(4);
     if (ValorCelda[i][j] == 0) {
-      ValorCelda[i][j] = 1;
+      ValorCelda[i][j] = (rand() % 10) / 9 + 1;;
       Encontrado = true;
     }
   } while (!Encontrado);
