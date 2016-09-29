@@ -6,8 +6,8 @@
 #define LCD_CD A2 // para poder visualizar elementos graficos
 #define LCD_WR A1
 #define LCD_RD A0
-#define LCD_RESET A4
-
+//OJO OJO Se modifico el escujo cambiando el pin fisico de A4 hacia 12
+#define LCD_RESET 12 
 #define CFondo 0xbd74
 
 static int Colores[13] = {
