@@ -11,20 +11,21 @@
 
 #define CFondo 0xbd74
 
-static int Colores[13] = {
+static int Colores[14] = {
   0xce16,//0 0
-  0xFF00,//2048
-  0xFF00,//8-3
-  0xFF00,//16-
-  0xFF00,//32
-  0xFF00,//64
-  0xFF00,//128
-  0xFF00,//512
-  0xFF00,//1024
-  0xFF00,//2048
-  0xFF00,//2048
-  0xFF00,//2048
-  0xFF00,//2048
+  0xED20,
+  0x1631,
+  0xF900,
+  0xF81F,
+  0x07F7,
+  0x6006,
+  0x01BF,
+  0xF900,
+  0x87FB,
+  0x6EF7,
+  0xED20,
+  0x6EF7,
+  0xA44E
 };
 
 //Enumeracion de los estados del automata finito de juego
@@ -51,10 +52,10 @@ static int GrosorY = GrosorX;
 //int GrosorY = Pantalla.height() / 4;
 //x y
 int ValorCelda[4][4] = {
-  { 0, 0, 0, 0},
-  { 3, 2, 2, 0},
-  { 0, 0, 0, 0},
-  { 4, 8,  12,  0}
+  { 1, 0, 0, 0},
+  { 1, 0, 0, 0},
+  { 1, 0, 0, 0},
+  { 1, 0,  0,  0}
 };
 
 int ValorCeldaPasada[4][4] = {
@@ -63,6 +64,14 @@ int ValorCeldaPasada[4][4] = {
   { 0, 0, 0, 0},
   { 4, 8,  12,  0}
 };
+
+int ValorUnion[4][4] = {
+  { 0, 0, 0, 0},
+  { 0, 0, 0, 0},
+  { 0, 0, 0, 0},
+  { 0, 0, 0,  0}
+};
+
 float Puntos = 0;
 float PPuntos = -1;
 
@@ -92,15 +101,17 @@ void setup() {
   Pantalla.setRotation(2);
   Pantalla.fillScreen(CFondo);
   Serial.println("Activando la pantalla");
+  Serial.print(Pantalla.width());
+  Serial.print("x");
+  Serial.println(Pantalla.height());
 
-
-  ReiniciarJuego();
+  // ReiniciarJuego();
   Dibujar();
 }
 
 void loop() {
   LeerSerial();//Buscas comando por el puero Serial
-  LeerGestos();//Busca comandos por el sensor de gestos
+//  LeerGestos();//Busca comandos por el sensor de gestos
 
   switch (EstadoJuego) {
     case Ey_INACTIVO:
@@ -111,6 +122,8 @@ void loop() {
       char x, x_ini, x_fin, x_inc, x_bus;
       char y, y_ini, y_fin, y_inc, y_bus;
       boolean Continuar;
+      Continuar = false;
+      boolean SeMovio;
       Continuar = false;
       switch (DirMovimiento) {
         case DM_ARR:
@@ -130,47 +143,58 @@ void loop() {
           y_ini = 0; y_fin = 4; y_inc = 1; y_bus = 0;
           break;
       }
-
       for (x = x_ini; x != x_fin; x += x_inc) {
         for (y = y_ini; y != y_fin; y += y_inc) {
-          if (ValorCelda[x][y] > 0) {
+          if (ValorCelda[x][y] > 0 && ValorUnion[x][y] == 0 ) {
             if ( ValorCelda[x + x_bus][y + y_bus] > 0) {
-              if ( ValorCelda[x + x_bus][y + y_bus] == ValorCelda[x][y]) {
+              if ( ValorCelda[x + x_bus][y + y_bus] == ValorCelda[x][y] ) {
                 ValorCelda[x][y] = 0;
                 ValorCelda[x + x_bus][y + y_bus]++;
                 Puntos += pow(2, ValorCelda[x + x_bus][y + y_bus]);
+                SeMovio = true;
+                ValorUnion[x + x_bus][y + y_bus] = 1;
               }
             }
             else {
               ValorCelda[x + x_bus][y + y_bus] = ValorCelda[x][y];
               ValorCelda[x][y] = 0;
+              SeMovio = true;
             }
+            DibujarCuadro(x, y, ValorCelda[x][y]);
+            DibujarCuadro(x + x_bus, y + y_bus, ValorCelda[x + x_bus][y + y_bus]);
           }
         }
-
       }
       for (x = x_ini; x != x_fin; x += x_inc) {
         for (y = y_ini; y != y_fin; y += y_inc) {
-          if ( ValorCelda[x][y] > 0 && ValorCelda[x + x_bus][y + y_bus] == 0) {
+          if (ValorUnion[x][y] == 0 && ValorCelda[x][y] > 0 && (ValorCelda[x + x_bus][y + y_bus] == 0 || ValorCelda[x + x_bus][y + y_bus] == ValorCelda[x][y]) ) {
             Continuar = true;
-            Serial.println("Segir");
+            Serial.println("Segir Moviendo");
+            continue;
           }
         }
       }
-      if (!Continuar)
-        EstadoJuego = Ey_CREAR;
-
+      if (!Continuar) {
+        if (SeMovio) {
+          EstadoJuego = Ey_CREAR;
+        }
+        else {
+          EstadoJuego = Ey_INACTIVO;
+        }
+      }
       break;
     case  Ey_CREAR:
       Serial.println("Creando");
       crearCelda();
       EstadoJuego = Ey_INACTIVO;
-
+      for (x = x_ini; x != x_fin; x += x_inc) {
+        for (y = y_ini; y != y_fin; y += y_inc) {
+          ValorUnion[x][y] == 0;
+        }
+      }
+      DibujarPuntos();//Dibuja el Marcador
       break;
-
   }
-  DibujarPuntos();//Dibuja el Marcador
-  Dibujar();//Actualizar la pantalla
 }
 
 void DibujarPuntos() {
@@ -216,9 +240,9 @@ void DibujarCuadro(int x, int y, int potencia) {
 }
 
 void Dibujar() {
-  for (int i = 0; i < 4; i++) {
-    for (int j = 0; j < 4; j++) {
-      DibujarCuadro(i, j, ValorCelda[i][j]);
+  for (int x = 0; x < 4; x++) {
+    for (int y = 0; y < 4; y++) {
+      DibujarCuadro(x, y, ValorCelda[x][y]);
     }
   }
 }
@@ -249,6 +273,7 @@ void LeerGestos() {
 void LeerSerial() {
   if (Serial.available()) {
     char caracter = Serial.read();
+    Serial.print("Mover...");
     switch (caracter) {
       case 'w':
         Accion(CC_ARRIBA);
@@ -311,6 +336,7 @@ void ReiniciarJuego() {
   Pantalla.fillScreen(CFondo);
   crearCelda();
   crearCelda();
+  Dibujar();
 }
 
 void crearCelda() {
