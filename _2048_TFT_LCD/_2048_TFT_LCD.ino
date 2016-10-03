@@ -1,6 +1,7 @@
 #include <Adafruit_GFX.h> // Libreria de graficos
 #include <Adafruit_TFTLCD.h> // Libreria de LCD
 #include <SparkFun_APDS9960.h> //Libreria del Sensor de Gestos
+#include <Wire.h>
 
 #define LCD_CS A3 // Definimos los pines del LCD
 #define LCD_CD A2 // para poder visualizar elementos graficos
@@ -9,7 +10,10 @@
 //OJO OJO Se modifico el escujo cambiando el pin fisico de A4 hacia 12
 #define LCD_RESET 12
 
-#define CFondo 0xbd74
+
+#define MAX17043_ADDRESS 0x36  // R/W =~ 0x6D/0x6C
+
+#define CFondo 0xbd74 //RGB656 
 
 static int Colores[14] = {
   0xce16,//0 0
@@ -54,7 +58,7 @@ static int GrosorY = GrosorX;
 int ValorCelda[4][4] = {
   { 1, 0, 0, 0},
   { 1, 0, 0, 0},
-  { 1, 0, 0, 0},
+  { 2, 0, 0, 0},
   { 1, 0,  0,  0}
 };
 
@@ -72,8 +76,15 @@ int ValorUnion[4][4] = {
   { 0, 0, 0,  0}
 };
 
+char x, x_ini, x_fin, x_inc, x_bus;
+char y, y_ini, y_fin, y_inc, y_bus;
+
 float Puntos = 0;
-float PPuntos = -1;
+float PPuntos = 10;
+
+
+float batPercentage;
+float pasPercentage = 10;
 
 ESTADO_JUEGO EstadoJuego = Ey_INACTIVO;  //Estado actual del automata
 DIR_MOVIMIENTO DirMovimiento;            //Direccion de movimiento cuando se desplaza
@@ -95,6 +106,11 @@ void setup() {
   Sensor.setGestureGain(GGAIN_1X);       //por default. Mermar la ganancia y la luz mejora la respuesta.
   Serial.println("Activando el sensor de Gestos");
 
+  Wire.begin();  // Start I2C
+  delay(100);
+  configMAX17043(32);  // Configure the MAX17043's alert percentage
+  qsMAX17043();  // restart fuel-gauge calculations
+  Serial.println("Activando Sensor de Voltaje de Vateria");
 
   //Iniciar la pantalla con el driver correcto
   Pantalla.begin(0x9325); // Iniciamos el LCD especificando el controlador ILI9341.
@@ -105,13 +121,18 @@ void setup() {
   Serial.print("x");
   Serial.println(Pantalla.height());
 
-  // ReiniciarJuego();
+  //ReiniciarJuego();
   Dibujar();
+  delay(100);
 }
 
 void loop() {
+
+  //Leer las entradas del juego
   LeerSerial();//Buscas comando por el puero Serial
-//  LeerGestos();//Busca comandos por el sensor de gestos
+  LeerGestos();//Busca comandos por el sensor de gestos
+
+  batPercentage = percentMAX17043();
 
   switch (EstadoJuego) {
     case Ey_INACTIVO:
@@ -119,81 +140,97 @@ void loop() {
       break;
     case Ey_DESPLAZAR:
       Serial.println("Empezando..");
-      char x, x_ini, x_fin, x_inc, x_bus;
-      char y, y_ini, y_fin, y_inc, y_bus;
-      boolean Continuar;
-      Continuar = false;
-      boolean SeMovio;
-      Continuar = false;
-      switch (DirMovimiento) {
-        case DM_ARR:
-          x_ini = 0; x_fin = 4; x_inc = 1; x_bus = 0;
-          y_ini = 1; y_fin = 4; y_inc = 1; y_bus = -1;
-          break;
-        case DM_ABA:
-          x_ini = 0; x_fin = 4; x_inc = 1; x_bus = 0;
-          y_ini = 2; y_fin = -1; y_inc = -1; y_bus = 1;
-          break;
-        case DM_IZQ:
-          x_ini = 1; x_fin = 4; x_inc = 1; x_bus = -1;
-          y_ini = 0; y_fin = 4; y_inc = 1; y_bus = 0;
-          break;
-        case DM_DER:
-          x_ini = 2; x_fin = -1; x_inc = -1; x_bus = 1;
-          y_ini = 0; y_fin = 4; y_inc = 1; y_bus = 0;
-          break;
-      }
-      for (x = x_ini; x != x_fin; x += x_inc) {
-        for (y = y_ini; y != y_fin; y += y_inc) {
-          if (ValorCelda[x][y] > 0 && ValorUnion[x][y] == 0 ) {
-            if ( ValorCelda[x + x_bus][y + y_bus] > 0) {
-              if ( ValorCelda[x + x_bus][y + y_bus] == ValorCelda[x][y] ) {
-                ValorCelda[x][y] = 0;
-                ValorCelda[x + x_bus][y + y_bus]++;
-                Puntos += pow(2, ValorCelda[x + x_bus][y + y_bus]);
-                SeMovio = true;
-                ValorUnion[x + x_bus][y + y_bus] = 1;
-              }
-            }
-            else {
-              ValorCelda[x + x_bus][y + y_bus] = ValorCelda[x][y];
-              ValorCelda[x][y] = 0;
-              SeMovio = true;
-            }
-            DibujarCuadro(x, y, ValorCelda[x][y]);
-            DibujarCuadro(x + x_bus, y + y_bus, ValorCelda[x + x_bus][y + y_bus]);
-          }
-        }
-      }
-      for (x = x_ini; x != x_fin; x += x_inc) {
-        for (y = y_ini; y != y_fin; y += y_inc) {
-          if (ValorUnion[x][y] == 0 && ValorCelda[x][y] > 0 && (ValorCelda[x + x_bus][y + y_bus] == 0 || ValorCelda[x + x_bus][y + y_bus] == ValorCelda[x][y]) ) {
-            Continuar = true;
-            Serial.println("Segir Moviendo");
-            continue;
-          }
-        }
-      }
-      if (!Continuar) {
-        if (SeMovio) {
-          EstadoJuego = Ey_CREAR;
-        }
-        else {
-          EstadoJuego = Ey_INACTIVO;
-        }
-      }
+      Moviendo();
       break;
     case  Ey_CREAR:
       Serial.println("Creando");
       crearCelda();
       EstadoJuego = Ey_INACTIVO;
-      for (x = x_ini; x != x_fin; x += x_inc) {
-        for (y = y_ini; y != y_fin; y += y_inc) {
+      for (int x = 0; x < 4; x++) {
+        for (int y = 0; y < 4 ; y++) {
           ValorUnion[x][y] == 0;
         }
       }
-      DibujarPuntos();//Dibuja el Marcador
       break;
+  }
+  DibujarPuntos();//Dibuja el Marcador
+  DibujarBateria();//Dibuja la bateria restante
+}
+
+void Moviendo() {
+  boolean Continuar;//Calcular si se puede mover mas
+  Continuar = false;
+  boolean SeMovio;//Ver si algo se movio
+  SeMovio = false;
+  switch (DirMovimiento) {
+    case DM_ARR:
+      x_ini = 0; x_fin = 4; x_inc = 1; x_bus = 0;
+      y_ini = 1; y_fin = 4; y_inc = 1; y_bus = -1;
+      break;
+    case DM_ABA:
+      x_ini = 0; x_fin = 4; x_inc = 1; x_bus = 0;
+      y_ini = 2; y_fin = -1; y_inc = -1; y_bus = 1;
+      break;
+    case DM_IZQ:
+      x_ini = 1; x_fin = 4; x_inc = 1; x_bus = -1;
+      y_ini = 0; y_fin = 4; y_inc = 1; y_bus = 0;
+      break;
+    case DM_DER:
+      x_ini = 2; x_fin = -1; x_inc = -1; x_bus = 1;
+      y_ini = 0; y_fin = 4; y_inc = 1; y_bus = 0;
+      break;
+  }
+  for (x = x_ini; x != x_fin; x += x_inc) {
+    for (y = y_ini; y != y_fin; y += y_inc) {
+      if (ValorCelda[x][y] > 0 /*&& ValorUnion[x][y] == 0*/ ) {
+        if ( ValorCelda[x + x_bus][y + y_bus] > 0) {
+          if ( ValorCelda[x + x_bus][y + y_bus] == ValorCelda[x][y] ) {
+            ValorCelda[x][y] = 0;
+            ValorCelda[x + x_bus][y + y_bus]++;
+            ValorUnion[x + x_bus][y + y_bus] = 1;
+            Puntos += pow(2, ValorCelda[x + x_bus][y + y_bus]);
+            SeMovio = true;
+
+          }
+        }
+        else {
+          ValorCelda[x + x_bus][y + y_bus] = ValorCelda[x][y];
+          ValorCelda[x][y] = 0;
+          SeMovio = true;
+        }
+        DibujarCuadro(x, y, ValorCelda[x][y]);
+        DibujarCuadro(x + x_bus, y + y_bus, ValorCelda[x + x_bus][y + y_bus]);
+      }
+    }
+  }
+  for (x = x_ini; x != x_fin; x += x_inc) {
+    for (y = y_ini; y != y_fin; y += y_inc) {
+      if (ValorUnion[x][y] == 0 && ValorCelda[x][y] > 0 && (ValorCelda[x + x_bus][y + y_bus] == 0 || ValorCelda[x + x_bus][y + y_bus] == ValorCelda[x][y]) ) {
+        Continuar = true;
+        Serial.println("Segir Moviendo");
+        continue;
+      }
+    }
+  }
+  if (!Continuar) {
+    if (SeMovio) {
+      EstadoJuego = Ey_CREAR;
+    }
+    else {
+      EstadoJuego = Ey_INACTIVO;
+    }
+  }
+}
+
+void DibujarBateria() {
+  if (batPercentage != pasPercentage) {
+    pasPercentage = batPercentage;
+    Pantalla.fillRect(GrosorX * 2 + 3, GrosorY * 4 + 55, GrosorX * 2 - 3 * 2, GrosorY - 3 * 2 , CFondo);
+    Pantalla.setCursor(GrosorX * 2 + 6, GrosorY * 4 + 60);
+    Pantalla.setTextSize(2);
+    Pantalla.print("B=");
+    Pantalla.print(batPercentage, 0);  // Print the battery percentage
+    Pantalla.println("%");
   }
 }
 
@@ -331,7 +368,6 @@ void ReiniciarJuego() {
     }
   }
   Puntos = 0;
-  PPuntos = 0;
   EstadoJuego = Ey_INACTIVO;
   Pantalla.fillScreen(CFondo);
   crearCelda();
@@ -342,11 +378,93 @@ void ReiniciarJuego() {
 void crearCelda() {
   bool Encontrado = false;
   do {
-    int i = random(4);
-    int j = random(4);
-    if (ValorCelda[i][j] == 0) {
-      ValorCelda[i][j] = (rand() % 10) / 9 + 1;;
+    int x = random(4);
+    int y = random(4);
+    if (ValorCelda[x][y] == 0) {
+      ValorCelda[x][y] = (rand() % 10) / 9 + 1;;
       Encontrado = true;
     }
   } while (!Encontrado);
 }
+
+/*
+  percentMAX17043() returns a float value of the battery percentage
+  reported from the SOC register of the MAX17043.
+*/
+float percentMAX17043()
+{
+  unsigned int soc;
+  float percent;
+
+  soc = i2cRead16(0x04);  // Read SOC register of MAX17043
+  percent = (byte) (soc >> 8);  // High byte of SOC is percentage
+  percent += ((float)((byte)soc)) / 256; // Low byte is 1/256%
+
+  return percent;
+}
+
+/*
+  configMAX17043(byte percent) configures the config register of
+  the MAX170143, specifically the alert threshold therein. Pass a
+  value between 1 and 32 to set the alert threshold to a value between
+  1 and 32%. Any other values will set the threshold to 32%.
+*/
+void configMAX17043(byte percent)
+{
+  if ((percent >= 32) || (percent == 0)) // Anything 32 or greater will set to 32%
+    i2cWrite16(0x9700, 0x0C);
+  else
+  {
+    byte percentBits = 32 - percent;
+    i2cWrite16((0x9700 | percentBits), 0x0C);
+  }
+}
+
+/*
+  qsMAX17043() issues a quick-start command to the MAX17043.
+  A quick start allows the MAX17043 to restart fuel-gauge calculations
+  in the same manner as initial power-up of the IC. If an application's
+  power-up sequence is very noisy, such that excess error is introduced
+  into the IC's first guess of SOC, the Arduino can issue a quick-start
+  to reduce the error.
+*/
+void qsMAX17043()
+{
+  i2cWrite16(0x4000, 0x06);  // Write a 0x4000 to the MODE register
+}
+
+/*
+  i2cRead16(unsigned char address) reads a 16-bit value beginning
+  at the 8-bit address, and continuing to the next address. A 16-bit
+  value is returned.
+*/
+unsigned int i2cRead16(unsigned char address)
+{
+  int data = 0;
+
+  Wire.beginTransmission(MAX17043_ADDRESS);
+  Wire.write(address);
+  Wire.endTransmission();
+
+  Wire.requestFrom(MAX17043_ADDRESS, 2);
+  while (Wire.available() < 2)
+    ;
+  data = ((int) Wire.read()) << 8;
+  data |= Wire.read();
+
+  return data;
+}
+
+/*
+  i2cWrite16(unsigned int data, unsigned char address) writes 16 bits
+  of data beginning at an 8-bit address, and continuing to the next.
+*/
+void i2cWrite16(unsigned int data, unsigned char address)
+{
+  Wire.beginTransmission(MAX17043_ADDRESS);
+  Wire.write(address);
+  Wire.write((byte)((data >> 8) & 0x00FF));
+  Wire.write((byte)(data & 0x00FF));
+  Wire.endTransmission();
+}
+
