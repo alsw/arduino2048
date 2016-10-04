@@ -1,7 +1,7 @@
 #include <Adafruit_GFX.h> // Libreria de graficos
 #include <Adafruit_TFTLCD.h> // Libreria de LCD
 #include <SparkFun_APDS9960.h> //Libreria del Sensor de Gestos
-#include <Wire.h>
+#include <Wire.h>//Libreria para I2C necesario para el sensor de Bateria
 
 #define LCD_CS A3 // Definimos los pines del LCD
 #define LCD_CD A2 // para poder visualizar elementos graficos
@@ -9,7 +9,6 @@
 #define LCD_RD A0
 //OJO OJO Se modifico el escujo cambiando el pin fisico de A4 hacia 12
 #define LCD_RESET 12
-
 
 #define MAX17043_ADDRESS 0x36  // R/W =~ 0x6D/0x6C
 
@@ -132,7 +131,7 @@ void loop() {
   LeerSerial();//Buscas comando por el puero Serial
   LeerGestos();//Busca comandos por el sensor de gestos
 
-  batPercentage = percentMAX17043();
+ // batPercentage = percentMAX17043();
 
   switch (EstadoJuego) {
     case Ey_INACTIVO:
@@ -241,6 +240,20 @@ void DibujarPuntos() {
     Pantalla.setCursor(GrosorX * 2.5, GrosorY * 4 + 10);
     Pantalla.setTextSize(2);
     Pantalla.print("SCORE");
+    Pantalla.setCursor(GrosorX * 2 + 3, GrosorY * 4.5);
+    Pantalla.setTextSize(3); // Definimos tamaño del texto.
+    Pantalla.setTextColor(0x00FFFF);
+    Pantalla.print(Puntos, 0);
+  }
+}
+
+void DibujarPuntosMAX() {
+  if (Puntos != PPuntos) {
+    PPuntos = Puntos;
+    Pantalla.fillRect(GrosorX * 1 + 3, GrosorY * 4 + 3, GrosorX * 2 - 3 * 2, GrosorY - 3 * 2 , CFondo);
+    Pantalla.setCursor(GrosorX * 2.5, GrosorY * 4 + 10);
+    Pantalla.setTextSize(2);
+    Pantalla.print("HIGH SCORE");
     Pantalla.setCursor(GrosorX * 2 + 3, GrosorY * 4.5);
     Pantalla.setTextSize(3); // Definimos tamaño del texto.
     Pantalla.setTextColor(0x00FFFF);
