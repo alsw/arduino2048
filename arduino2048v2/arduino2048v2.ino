@@ -81,7 +81,7 @@ int ValorCelda[4][4] = {
   { 1, 0, 0, 0},
   { 1, 0, 0, 0},
   { 2, 0, 0, 0},
-  { 1, 0,  0,  0}
+  { 3, 0,  0,  0}
 };
 
 int ValorCeldaPasada[4][4] = {
@@ -109,6 +109,7 @@ int Guardado = 0;
 
 float Puntos = 0;
 float PPuntos = 10;
+float PMenos = 0;
 
 float batPercentage;
 float pasPercentage = 10;
@@ -148,7 +149,7 @@ void setup() {
   Serial.print("x");
   Serial.println(Pantalla.height());
 
-  //ReiniciarJuego();
+  ReiniciarJuego();
   Dibujar();
   delay(100);
 }
@@ -192,7 +193,6 @@ void loop() {
             break;
         }
         Continuamos = ES_PARAR;
-        LimpiarUnion();
       }
       break;
     case ES_CREAR:
@@ -200,6 +200,7 @@ void loop() {
       Guardado = 0;
       EstadoJuego = ES_INACTIVO;
       LimpiarUnion();
+      //MostrarMatix(ValorUnion);
       break;
   }
 
@@ -208,11 +209,22 @@ void loop() {
 }
 
 void LimpiarUnion() {
-  for (int x = 0; x < 4; x++) {
-    for (int y = 0; y < 4 ; y++) {
-      ValorUnion[x][y] == 0;
+  for (x = 0; x < 4; x++) {
+    for (y = 0; y < 4 ; y++) {
+      ValorUnion[x][y] = 0;
     }
   }
+}
+
+void MostrarMatix(int M[4][4]) {
+  for (int x = 0; x < 4; x++) {
+    for (int y = 0; y < 4 ; y++) {
+      Serial.print(M[x][y]);
+      Serial.print(" ");
+    }
+    Serial.println();
+  }
+  Serial.println();
 }
 
 int SePuedeMover() {
@@ -255,7 +267,7 @@ void EscojerDirecion() {
   }
 }
 
-void Moviendo(){
+void Moviendo() {
   for (x = x_ini; x != x_fin; x += x_inc) {
     for (y = y_ini; y != y_fin; y += y_inc) {
 
@@ -271,7 +283,8 @@ void Moviendo(){
           ValorCelda[x][y] = 0;
           ValorCelda[x + x_bus][y + y_bus]++;
           ValorUnion[x + x_bus][y + y_bus] = 1;
-          Puntos += pow(2, ValorCelda[x + x_bus][y + y_bus]);
+          PMenos = pow(2, ValorCelda[x + x_bus][y + y_bus]);
+          Puntos += PMenos;
           Continuamos = ES_SUMA;
           DibujarCuadro(x, y, ValorCelda[x][y]);
           DibujarCuadro(x + x_bus, y + y_bus, ValorCelda[x + x_bus][y + y_bus]);
@@ -444,6 +457,7 @@ void RegresarMovimiento() {
       ValorCelda[x][y] = ValorCeldaPasada[x][y];
     }
   }
+  Puntos -= PMenos;
   Dibujar();
 }
 
