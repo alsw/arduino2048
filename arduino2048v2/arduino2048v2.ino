@@ -1,6 +1,7 @@
 #include <Adafruit_GFX.h> // Libreria de graficos
 #include <Adafruit_TFTLCD.h> // Libreria de LCD
 #include <SparkFun_APDS9960.h> //Libreria del Sensor de Gestos
+#include <TouchScreen.h>     // Libreria del panel tactil
 #include <Wire.h>//Libreria para I2C necesario para el sensor de Bateria
 
 #define LCD_CS A3 // Definimos los pines del LCD
@@ -9,6 +10,12 @@
 #define LCD_RD A0
 //OJO OJO Se modifico el escujo cambiando el pin fisico de A4 hacia 12
 #define LCD_RESET 12
+
+// Pines necesarios para los 4 pines del panel tactil
+#define YP A1 // Pin analogico A1 para ADC
+#define XM A2 // Pin analogico A2 para ADC
+#define YM 7
+#define XP 6
 
 #define MAX17043_ADDRESS 0x36  // R/W =~ 0x6D/0x6C
 
@@ -33,16 +40,20 @@ static int Colores[14] = {
 
 //Enumeracion de los estados del automata finito de juego
 enum ESTADO_JUEGO {
-  Ey_INACTIVO, Ey_DESPLAZAR, Ey_COMBINAR, Ey_CREAR,
+  ES_INACTIVO, ES_DESPLAZAR, ES_COMBINAR, ES_CREAR, ES_REGRESAR
 };
 
 //Enumeracion de los comandos de control de juego
 enum COMANDO_CONTROL {
-  CC_IZQUIERDA, CC_DERECHA, CC_ARRIBA, CC_ABAJO, CC_REINICIAR,
+  CC_IZQUIERDA, CC_DERECHA, CC_ARRIBA, CC_ABAJO, CC_REINICIAR, CC_REGRESA
 };
 
 enum DIR_MOVIMIENTO {
   DM_IZQ, DM_DER, DM_ARR, DM_ABA,
+};
+
+enum ESTADO_PASOS {
+  ES_PARAR, ES_SEGIR, ES_MOVIO, ES_SUMA
 };
 
 Adafruit_TFTLCD Pantalla(LCD_CS, LCD_CD, LCD_WR, LCD_RD, LCD_RESET); // Instancia LCD
@@ -50,10 +61,22 @@ Adafruit_TFTLCD Pantalla(LCD_CS, LCD_CD, LCD_WR, LCD_RD, LCD_RESET); // Instanci
 //Instancia de objeto para la clase del sensor de gestos
 SparkFun_APDS9960 Sensor = SparkFun_APDS9960();
 
+short TS_MINX = 150; // Coordenadas del panel tactil para delimitar
+short TS_MINY = 120; // el tamaño de la zona donde podemos presionar
+short TS_MAXX = 850; // y que coincida con el tamaño del LCD
+short TS_MAXY = 891;
+
+// Para mejor precision de la presion realizada, es necesario
+// medir la resistencia entre los pines X+ y X-.
+// En Shield TFT 2.4" LCD se mide entre los pines A2 y 6
+// Instancia del panel tactil (Pin XP, YP, XM, YM, Resistencia del panel)
+TouchScreen Tactil = TouchScreen(XP, YP, XM, YM, 364);
+
 static int GrosorX = Pantalla.width() / 4 ;
 static int GrosorY = GrosorX;
 //int GrosorY = Pantalla.height() / 4;
 //x y
+
 int ValorCelda[4][4] = {
   { 1, 0, 0, 0},
   { 1, 0, 0, 0},
@@ -63,9 +86,9 @@ int ValorCelda[4][4] = {
 
 int ValorCeldaPasada[4][4] = {
   { 0, 0, 0, 0},
-  { 4, 2, 2, 0},
   { 0, 0, 0, 0},
-  { 4, 8,  12,  0}
+  { 0, 0, 0, 0},
+  { 0, 0, 0, 0}
 };
 
 int ValorUnion[4][4] = {
@@ -75,19 +98,24 @@ int ValorUnion[4][4] = {
   { 0, 0, 0,  0}
 };
 
-char x, x_ini, x_fin, x_inc, x_bus;
-char y, y_ini, y_fin, y_inc, y_bus;
+int x, x_ini, x_fin, x_inc, x_bus;
+int y, y_ini, y_fin, y_inc, y_bus;
+
+int X; // Variables que almacenaran la coordenada
+int Y; // X, Y donde presionemos y la variable Z
+int Z; // almacenara la presion realizada
+
+int Guardado = 0;
 
 float Puntos = 0;
 float PPuntos = 10;
 
-
 float batPercentage;
 float pasPercentage = 10;
 
-ESTADO_JUEGO EstadoJuego = Ey_INACTIVO;  //Estado actual del automata
+ESTADO_JUEGO EstadoJuego = ES_INACTIVO; //Estado actual del automata
 DIR_MOVIMIENTO DirMovimiento;            //Direccion de movimiento cuando se desplaza
-
+ESTADO_PASOS Continuamos =  ES_PARAR;
 
 void setup() {
   //Se inicializa el puerto serie
@@ -130,37 +158,83 @@ void loop() {
   //Leer las entradas del juego
   LeerSerial();//Buscas comando por el puero Serial
   LeerGestos();//Busca comandos por el sensor de gestos
+  LecturaPanel();
 
- // batPercentage = percentMAX17043();
+  // batPercentage = percentMAX17043();
 
   switch (EstadoJuego) {
-    case Ey_INACTIVO:
+    case ES_INACTIVO:
 
       break;
-    case Ey_DESPLAZAR:
+    case ES_DESPLAZAR:
       Serial.println("Empezando..");
-      Moviendo();
-      break;
-    case  Ey_CREAR:
-      Serial.println("Creando");
-      crearCelda();
-      EstadoJuego = Ey_INACTIVO;
-      for (int x = 0; x < 4; x++) {
-        for (int y = 0; y < 4 ; y++) {
-          ValorUnion[x][y] == 0;
+      EscojerDirecion();
+      if (SePuedeMover()) {
+        if (Guardado == 0) {
+          Guardado = 1;
+          GuardasPasado();
         }
+        Moviendo();
+      }
+      else {
+        switch (Continuamos) {
+          case ES_SEGIR:
+            EstadoJuego = ES_CREAR;
+            break;
+          case ES_PARAR:
+            EstadoJuego = ES_INACTIVO;
+            break;
+          case ES_MOVIO:
+            EstadoJuego = ES_CREAR;
+            break;
+          case ES_SUMA:
+            EstadoJuego = ES_CREAR;
+            break;
+        }
+        Continuamos = ES_PARAR;
+        LimpiarUnion();
       }
       break;
+    case ES_CREAR:
+      crearCelda();
+      Guardado = 0;
+      EstadoJuego = ES_INACTIVO;
+      LimpiarUnion();
+      break;
   }
+
   DibujarPuntos();//Dibuja el Marcador
   DibujarBateria();//Dibuja la bateria restante
 }
 
-void Moviendo() {
-  boolean Continuar;//Calcular si se puede mover mas
-  Continuar = false;
-  boolean SeMovio;//Ver si algo se movio
-  SeMovio = false;
+void LimpiarUnion() {
+  for (int x = 0; x < 4; x++) {
+    for (int y = 0; y < 4 ; y++) {
+      ValorUnion[x][y] == 0;
+    }
+  }
+}
+
+int SePuedeMover() {
+  for (x = x_ini; x != x_fin; x += x_inc) {
+    for (y = y_ini; y != y_fin; y += y_inc) {
+      if (ValorUnion[x][y] == 0 &&
+          ValorCelda[x][y] > 0 &&
+          (ValorCelda[x + x_bus][y + y_bus] == 0 ||
+           (ValorCelda[x + x_bus][y + y_bus] == ValorCelda[x][y]
+            && ValorUnion[x + x_bus][y + y_bus] == 0))) {
+        Serial.print("Segir Moviendo ");
+        Serial.print(x);
+        Serial.print("-");
+        Serial.println(y);
+        return 1;
+      }
+    }
+  }
+  return 0;
+}
+void EscojerDirecion() {
+  Serial.println("Direcion..");
   switch (DirMovimiento) {
     case DM_ARR:
       x_ini = 0; x_fin = 4; x_inc = 1; x_bus = 0;
@@ -179,44 +253,30 @@ void Moviendo() {
       y_ini = 0; y_fin = 4; y_inc = 1; y_bus = 0;
       break;
   }
+}
+
+void Moviendo(){
   for (x = x_ini; x != x_fin; x += x_inc) {
     for (y = y_ini; y != y_fin; y += y_inc) {
-      if (ValorCelda[x][y] > 0 /*&& ValorUnion[x][y] == 0*/ ) {
-        if ( ValorCelda[x + x_bus][y + y_bus] > 0) {
-          if ( ValorCelda[x + x_bus][y + y_bus] == ValorCelda[x][y] ) {
-            ValorCelda[x][y] = 0;
-            ValorCelda[x + x_bus][y + y_bus]++;
-            ValorUnion[x + x_bus][y + y_bus] = 1;
-            Puntos += pow(2, ValorCelda[x + x_bus][y + y_bus]);
-            SeMovio = true;
 
-          }
-        }
-        else {
+      if (ValorCelda[x][y] > 0 ) {/*&& ValorUnion[x][y] == 0*/
+        if (ValorCelda[x + x_bus][y + y_bus] == 0) {
           ValorCelda[x + x_bus][y + y_bus] = ValorCelda[x][y];
           ValorCelda[x][y] = 0;
-          SeMovio = true;
+          Continuamos = ES_MOVIO;
+          DibujarCuadro(x, y, ValorCelda[x][y]);
+          DibujarCuadro(x + x_bus, y + y_bus, ValorCelda[x + x_bus][y + y_bus]);
         }
-        DibujarCuadro(x, y, ValorCelda[x][y]);
-        DibujarCuadro(x + x_bus, y + y_bus, ValorCelda[x + x_bus][y + y_bus]);
+        else if (ValorCelda[x + x_bus][y + y_bus] == ValorCelda[x][y]) {
+          ValorCelda[x][y] = 0;
+          ValorCelda[x + x_bus][y + y_bus]++;
+          ValorUnion[x + x_bus][y + y_bus] = 1;
+          Puntos += pow(2, ValorCelda[x + x_bus][y + y_bus]);
+          Continuamos = ES_SUMA;
+          DibujarCuadro(x, y, ValorCelda[x][y]);
+          DibujarCuadro(x + x_bus, y + y_bus, ValorCelda[x + x_bus][y + y_bus]);
+        }
       }
-    }
-  }
-  for (x = x_ini; x != x_fin; x += x_inc) {
-    for (y = y_ini; y != y_fin; y += y_inc) {
-      if (ValorUnion[x][y] == 0 && ValorCelda[x][y] > 0 && (ValorCelda[x + x_bus][y + y_bus] == 0 || ValorCelda[x + x_bus][y + y_bus] == ValorCelda[x][y]) ) {
-        Continuar = true;
-        Serial.println("Segir Moviendo");
-        continue;
-      }
-    }
-  }
-  if (!Continuar) {
-    if (SeMovio) {
-      EstadoJuego = Ey_CREAR;
-    }
-    else {
-      EstadoJuego = Ey_INACTIVO;
     }
   }
 }
@@ -350,38 +410,59 @@ void LeerSerial() {
 }
 
 void Accion(COMANDO_CONTROL comando) {
-  if (EstadoJuego != Ey_INACTIVO) return;
+  if (EstadoJuego != ES_INACTIVO) return;
   switch (comando) {
     case CC_IZQUIERDA:
-      EstadoJuego = Ey_DESPLAZAR;
+      EstadoJuego = ES_DESPLAZAR;
       DirMovimiento = DM_IZQ;
       break;
     case CC_DERECHA:
-      EstadoJuego = Ey_DESPLAZAR;
+      EstadoJuego = ES_DESPLAZAR;
       DirMovimiento = DM_DER;
       break;
     case CC_ARRIBA:
-      EstadoJuego = Ey_DESPLAZAR;
+      EstadoJuego = ES_DESPLAZAR;
       DirMovimiento = DM_ARR;
       break;
     case CC_ABAJO:
-      EstadoJuego = Ey_DESPLAZAR;
+      EstadoJuego = ES_DESPLAZAR;
       DirMovimiento = DM_ABA;
       break;
     case CC_REINICIAR:
       ReiniciarJuego();
       break;
+    case CC_REGRESA:
+      RegresarMovimiento();
+      break;
+  }
+}
+
+void RegresarMovimiento() {
+  Serial.println("Regresando");
+  for (int x = 0; x < 4; x++) {
+    for (int y = 0; y < 4; y++) {
+      ValorCelda[x][y] = ValorCeldaPasada[x][y];
+    }
+  }
+  Dibujar();
+}
+
+void GuardasPasado() {
+  for (int x = 0; x < 4; x++) {
+    for (int y = 0; y < 4; y++) {
+      ValorCeldaPasada[x][y] = ValorCelda[x][y];
+    }
   }
 }
 
 void ReiniciarJuego() {
-  for (int i = 0; i < 4; i++) {
-    for (int j = 0; j < 4; j++) {
-      ValorCelda[i][j] = 0;
+  for (int x = 0; x < 4; x++) {
+    for (int y = 0; y < 4; y++) {
+      ValorCelda[x][y] = 0;
     }
   }
   Puntos = 0;
-  EstadoJuego = Ey_INACTIVO;
+  EstadoJuego = ES_INACTIVO;
   Pantalla.fillScreen(CFondo);
   crearCelda();
   crearCelda();
@@ -390,14 +471,25 @@ void ReiniciarJuego() {
 
 void crearCelda() {
   bool Encontrado = false;
+  int XR;
+  int YR;
   do {
-    int x = random(4);
-    int y = random(4);
-    if (ValorCelda[x][y] == 0) {
-      ValorCelda[x][y] = (rand() % 10) / 9 + 1;;
+    XR = random(4);
+    YR = random(4);
+    if (ValorCelda[XR][YR] == 0) {
+      ValorCelda[XR][YR] = (rand() % 20) / 19 + 1;;
       Encontrado = true;
     }
+    else {
+      Serial.print(" .. Buscando .. ");
+    }
   } while (!Encontrado);
+  Serial.println();
+  Serial.print("Creando ");
+  Serial.print(XR);
+  Serial.print("-");
+  Serial.println(YR);
+  DibujarCuadro(XR, YR, ValorCelda[XR][YR]);
 }
 
 /*
@@ -481,3 +573,21 @@ void i2cWrite16(unsigned int data, unsigned char address)
   Wire.endTransmission();
 }
 
+void LecturaPanel() {
+  TSPoint p = Tactil.getPoint(); // Realizamos lectura de las coordenadas
+
+  pinMode(XM, OUTPUT); // La librería utiliza estos pines como entrada y salida
+  pinMode(YP, OUTPUT); // por lo que es necesario declararlos como salida justo
+  // despues de realizar una lectura de coordenadas.
+
+  // Mapeamos los valores analogicos leidos del panel tactil (0-1023)
+  // y los convertimos en valor correspondiente a la medida del LCD 320x240
+  X = map(p.x, TS_MAXX, TS_MINX,  Pantalla.width(), 0);
+  Y = map(p.y, TS_MAXY, TS_MINY,  Pantalla.height(), 0);
+  Z = p.z;
+  if (Z > 0 && Z < 1000) {
+    Serial.print("Z");
+    Serial.println(Z);
+    Accion(CC_REGRESA);
+  }
+}
